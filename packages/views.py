@@ -78,8 +78,7 @@ class PackageViewSet(viewsets.ModelViewSet):
                 Q(sender_agent=user) |
                 Q(receiver_agent=user) |
                 Q(destination_branch=user.branch)
-            ).select_related(
-                'status', 'category', 'sender_agent', 'receiver_agent',
+            ).select_related( 'category', 'sender_agent', 'receiver_agent',
                 'origin_branch', 'destination_branch'
             )
                 
@@ -87,8 +86,7 @@ class PackageViewSet(viewsets.ModelViewSet):
         if user.role and user.role.name.lower() == 'branch admin' and hasattr(user, 'branch'):
             return Package.objects.filter(
                 Q(origin_branch=user.branch) | Q(destination_branch=user.branch)
-            ).select_related(
-                'status', 'category', 'sender_agent', 'receiver_agent',
+            ).select_related('category', 'sender_agent', 'receiver_agent',
                 'origin_branch', 'destination_branch'
             )
 
@@ -97,15 +95,13 @@ class PackageViewSet(viewsets.ModelViewSet):
             return Package.objects.filter(
                 Q(origin_branch__company=user.company) | 
                 Q(destination_branch__company=user.company)
-            ).select_related(
-                'status', 'category', 'sender_agent', 'receiver_agent',
+            ).select_related( 'category', 'sender_agent', 'receiver_agent',
                 'origin_branch', 'destination_branch'
             )
 
         # System admin or fallback
         if user.role and user.role.name.lower() == 'system admin':
-            return Package.objects.all().select_related(
-                'status', 'category', 'sender_agent', 'receiver_agent',
+            return Package.objects.all().select_related('category', 'sender_agent', 'receiver_agent',
                 'origin_branch', 'destination_branch'
             )
             
@@ -210,7 +206,7 @@ class PackageViewSet(viewsets.ModelViewSet):
                 tracking_number=tracking_number,
                 origin_branch=agent_user.branch,
                 sender_agent=agent_user,
-                status=self.get_pending_status(),
+                status="pending",
                 shipping_fee=shipping_fee
             )
             
@@ -224,7 +220,7 @@ class PackageViewSet(viewsets.ModelViewSet):
                 company=agent_user.company,
                 departure_time=departure_time,
                 amount_paid=shipping_fee,
-                status="sent"
+                status="pending",
             )
             
             logger.info(
@@ -264,13 +260,9 @@ class PackageViewSet(viewsets.ModelViewSet):
         if package.destination_branch != agent.branch:
             raise PermissionDenied("Only agents at the destination branch can mark packages as delivered.")
             
-        # Get or create 'Delivered' status
-        delivered_status = PackageStatus.objects.get_or_create(
-            name="Delivered",
-            defaults={"updated_by": request.user}
-        )[0]
         
-        package.status = delivered_status
+        
+        package.status = 'sent'
         package.receiver_agent = agent
         package.save()
         
@@ -284,6 +276,55 @@ class PackageViewSet(viewsets.ModelViewSet):
             logger.warning(f"No ticket found for package {package.tracking_number}")
         
         return Response({"status": "Package marked as delivered"}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='mark_sent')
+    def mark_sent(self, request, pk=None):
+        package = self.get_object()
+        user = request.user
+
+        if not user.role or user.role.name.lower() != "agent":
+            raise PermissionDenied("Only agents can mark packages as sent.")
+
+        if package.origin_branch != user.branch:
+            raise PermissionDenied("Only the sender's branch agent can mark it as sent.")
+
+        ticket = get_object_or_404(Ticket, package=package)
+
+        driver_id = request.data.get('driver')
+        vehicle_id = request.data.get('vehicle')
+        departure_time = request.data.get('departure_time')
+
+        # Validate fields
+        if not (driver_id and vehicle_id and departure_time):
+            raise ValidationError({"error": "Driver, vehicle, and departure time are required."})
+
+        try:
+            driver = Driver.objects.get(id=driver_id, company=user.company)
+            vehicle = Vehicle.objects.get(id=vehicle_id, company=user.company)
+        except (Driver.DoesNotExist, Vehicle.DoesNotExist):
+            raise ValidationError({"error": "Driver or Vehicle not found in your company."})
+
+        # Validate departure_time
+        try:
+            dep_time = timezone.datetime.fromisoformat(departure_time.replace('Z', '+00:00'))
+        except Exception:
+            raise ValidationError({"departure_time": "Invalid ISO format."})
+
+        if dep_time <= timezone.now():
+            raise ValidationError({"departure_time": "Departure must be in the future."})
+
+        # Update ticket
+        ticket.driver = driver
+        ticket.vehicle = vehicle
+        ticket.departure_time = dep_time
+        ticket.status = 'sent'
+        ticket.save()
+
+        # Update package status (optional if using PackageStatus FK)
+        package.status = 'sent'
+        package.save()
+
+        return Response({"message": "Package marked as sent."}, status=200)
 
     @action(detail=False, methods=['get'])
     def pending(self, request):

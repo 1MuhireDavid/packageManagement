@@ -34,6 +34,7 @@ class PackageSerializer(serializers.ModelSerializer):
         write_only=True,
         required=False
     )
+    status = serializers.ChoiceField(choices=STATUS_CHOICES, read_only=True)
     
     class Meta:
         model = Package
@@ -65,6 +66,7 @@ class PackageSerializer(serializers.ModelSerializer):
 
     
 class TicketSerializer(serializers.ModelSerializer):
+    status = serializers.ChoiceField(choices=STATUS_CHOICES, read_only=True)
     class Meta:
         model = Ticket
         fields = '__all__'

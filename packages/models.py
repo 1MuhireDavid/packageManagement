@@ -3,6 +3,13 @@ from django.db import models
 from django.utils import timezone
 from users.models import User
 
+STATUS_CHOICES = [
+    ("pending", "Pending"),
+    ("sent", "Sent"),
+    ("received", "Received"),
+    ("delivered", "Delivered"),
+]
+
 class Company(models.Model):
     name = models.CharField(max_length=255)
     address = models.CharField(max_length=255)  # Add this
@@ -45,7 +52,7 @@ class Package(models.Model):
     value = models.DecimalField(max_digits=10, decimal_places=2)
     shipping_fee = models.DecimalField(max_digits=10, decimal_places=2)
     category = models.ForeignKey(Category, on_delete=models.CASCADE)
-    status = models.ForeignKey(PackageStatus, on_delete=models.SET_NULL, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     sender_agent = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_packages')
     receiver_agent = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_packages', null=True)
     origin_branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='origin_packages')
@@ -66,6 +73,6 @@ class Ticket(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     departure_time = models.DateTimeField()
     amount_paid = models.DecimalField(max_digits=10, decimal_places=2)
-    status = models.CharField(max_length=20, choices=[("sent", "Sent"), ("received", "Received"), ("delivered", "Delivered")])
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
