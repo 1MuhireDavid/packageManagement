@@ -18,10 +18,13 @@ class Category(models.Model):
     name = models.CharField(max_length=255)
 
 class Driver(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
-    company = models.ForeignKey(Company, on_delete=models.CASCADE)  # Add this
-    phone = models.CharField(max_length=20)  # Add this
-    branch = models.ForeignKey(Branch, on_delete=models.CASCADE)
+    name = models.CharField(max_length=255)
+    license_number = models.CharField(max_length=50, unique=True)
+    phone = models.CharField(max_length=20)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE)
+
+    def __str__(self):
+        return f"{self.name} ({self.license_number})"
 
 class Vehicle(models.Model):
     plate_number = models.CharField(max_length=50)
@@ -29,9 +32,6 @@ class Vehicle(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE)  # Add this
     driver = models.ForeignKey(Driver, on_delete=models.CASCADE)
 
-class Agent(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
-    branch = models.ForeignKey(Branch, on_delete=models.CASCADE)
 
 class PackageStatus(models.Model):
     name = models.CharField(max_length=50)
@@ -46,10 +46,14 @@ class Package(models.Model):
     shipping_fee = models.DecimalField(max_digits=10, decimal_places=2)
     category = models.ForeignKey(Category, on_delete=models.CASCADE)
     status = models.ForeignKey(PackageStatus, on_delete=models.SET_NULL, null=True)
-    sender_agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='sent_packages')
-    receiver_agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='received_packages')
+    sender_agent = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_packages')
+    receiver_agent = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_packages', null=True)
     origin_branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='origin_packages')
     destination_branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='destination_packages')
+    sender_name = models.CharField(max_length=255)
+    sender_phone = models.CharField(max_length=20)
+    receiver_name = models.CharField(max_length=255)
+    receiver_phone = models.CharField(max_length=20)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

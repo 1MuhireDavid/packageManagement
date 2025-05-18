@@ -1,25 +1,24 @@
 from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
 from django.db.models import Q
-from rest_framework import viewsets, generics, status, filters
+from rest_framework import viewsets, generics, status
 from rest_framework.response import Response
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from django_filters.rest_framework import DjangoFilterBackend
 import uuid
 import logging
 from django.contrib.auth.models import User
 from users.serializers import UserSerializer
 from .models import (
     Package, PackageStatus, Ticket, Company, Branch, Driver,
-    Vehicle, Category, Agent
+    Vehicle, Category
 )
-from .serializers import PackageSerializer, PackageStatusSerializer, TicketSerializer, CompanySerializer, BranchSerializer, DriverSerializer, VehicleSerializer, CategorySerializer, AgentSerializer
+from .serializers import PackageSerializer, PackageStatusSerializer, TicketSerializer, CompanySerializer, BranchSerializer, DriverSerializer, VehicleSerializer, CategorySerializer
 from users.permissions import IsAgent, IsSystemAdmin, IsCompanyAdmin, IsBranchAdmin
-
+from decimal import Decimal,InvalidOperation
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +31,6 @@ class PackageViewSet(viewsets.ModelViewSet):
     queryset = Package.objects.all()
     serializer_class = PackageSerializer
     permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status__name', 'category', 'origin_branch', 'destination_branch']
-    search_fields = ['tracking_number', 'name']
-    ordering_fields = ['created_at', 'updated_at', 'value', 'weight']
     ordering = ['-created_at']
     
     def get_permissions(self):
@@ -52,10 +47,10 @@ class PackageViewSet(viewsets.ModelViewSet):
         """
         Get the agent associated with the current user.
         """
-        try:
-            return Agent.objects.get(user=self.request.user)
-        except Agent.DoesNotExist:
-            return None
+        user = self.request.user
+        if user.role and user.role.name.lower() == "agent":
+            return user
+        return None
 
     def get_pending_status(self):
         """
@@ -78,12 +73,11 @@ class PackageViewSet(viewsets.ModelViewSet):
             return Package.objects.none()
 
         # If user is an agent
-        if hasattr(user, 'agent'):
-            agent = user.agent
+        if user.role and user.role.name.lower() == 'agent':
             return Package.objects.filter(
-                Q(sender_agent=agent) |
-                Q(receiver_agent=agent) |
-                Q(destination_branch=agent.branch)
+                Q(sender_agent=user) |
+                Q(receiver_agent=user) |
+                Q(destination_branch=user.branch)
             ).select_related(
                 'status', 'category', 'sender_agent', 'receiver_agent',
                 'origin_branch', 'destination_branch'
@@ -117,20 +111,6 @@ class PackageViewSet(viewsets.ModelViewSet):
             
         return Package.objects.none()
 
-    @swagger_auto_schema(
-        manual_parameters=[
-            openapi.Parameter(
-                'status', openapi.IN_QUERY,
-                description="Filter by status name",
-                type=openapi.TYPE_STRING
-            ),
-        ],
-        responses={
-            status.HTTP_200_OK: PackageSerializer(many=True),
-            status.HTTP_400_BAD_REQUEST: "Bad request",
-            status.HTTP_401_UNAUTHORIZED: "Unauthorized"
-        }
-    )
     def list(self, request, *args, **kwargs):
         """
         List all packages the user has access to based on their role.
@@ -158,51 +138,78 @@ class PackageViewSet(viewsets.ModelViewSet):
         """
         Handle the package creation process including validation and related ticket creation.
         """
-        agent = self.get_agent()
-        if not agent:
+        agent_user = self.request.user
+        if not agent_user.role or agent_user.role.name.lower() != "agent":
             raise PermissionDenied("Only agents can create packages.")
 
         # Extract and validate data
-        data = serializer.validated_data
-        destination_branch = data.get('destination_branch')
+        data = self.request.data
+        destination_branch = serializer.validated_data.get('destination_branch')
+
+        # Get driver, vehicle and departure_time from request data
+        driver_id = data.get('driver')
+        vehicle_id = data.get('vehicle')
+        departure_time_str = data.get('departure_time')
+        sender_name = serializer.validated_data.get('sender_name')
+        sender_phone = serializer.validated_data.get('sender_phone')
+        receiver_name = serializer.validated_data.get('receiver_name')
+        receiver_phone = serializer.validated_data.get('receiver_phone')
+
+        if not sender_name or not sender_phone:
+            raise ValidationError({"sender_details": "Sender name and phone are required."})
+        
+        if not receiver_name or not receiver_phone:
+            raise ValidationError({"receiver_details": "Receiver name and phone are required."})
         
         if not destination_branch:
             raise ValidationError({"destination_branch": "This field is required."})
             
-        if destination_branch.company != agent.branch.company:
+        if destination_branch.company != agent_user.company:
             raise ValidationError({"destination_branch": "Destination branch must belong to your company."})
 
         # Validate driver belongs to the right branch/company
-        driver = data.get('driver')
-        if not driver:
+        try:
+            driver = Driver.objects.get(id=driver_id)
+        except (Driver.DoesNotExist, ValueError, TypeError):
             raise ValidationError({"driver": "Driver is required."})
-        if driver.branch.company != agent.branch.company:
+        
+        if driver.company != agent_user.company:
             raise ValidationError({"driver": "Driver must belong to your company."})
 
         # Validate vehicle belongs to the specified driver
-        vehicle = data.get('vehicle')
-        if not vehicle:
+        try:
+            vehicle = Vehicle.objects.get(id=vehicle_id)
+        except (Vehicle.DoesNotExist, ValueError, TypeError):
             raise ValidationError({"vehicle": "Vehicle is required."})
-        if vehicle.driver != driver:
-            raise ValidationError({"vehicle": "Vehicle must belong to the specified driver."})
+        
+        if vehicle.company != agent_user.company:
+            raise ValidationError("Vehicle must belong to your company.")
 
-        # Validate departure time is in the future
-        departure_time = data.get('departure_time')
-        if not departure_time:
-            raise ValidationError({"departure_time": "Departure time is required."})
+        
+        try:
+            departure_time = timezone.datetime.fromisoformat(departure_time_str.replace('Z', '+00:00'))
+        except (ValueError, AttributeError, TypeError):
+            raise ValidationError({"departure_time": "Departure time is required in valid ISO format."})
+        
         if departure_time <= timezone.now():
             raise ValidationError({"departure_time": "Departure time must be in the future."})
 
         # Generate tracking number and calculate shipping fee
         tracking_number = f"PKG-{uuid.uuid4().hex[:8].upper()}"
-        shipping_fee = round(data.get('value', 0) * 0.10, 2)
+        value_str = serializer.validated_data.get('value', '0')
+        try:
+            value = Decimal(str(value_str))
+        except InvalidOperation:
+            raise ValidationError({'value': 'Invalid numeric value.'})
+
+        shipping_fee = round(value * Decimal('0.10'), 2)
         
         try:
             # Save the package
             package = serializer.save(
                 tracking_number=tracking_number,
-                origin_branch=agent.branch,
-                sender_agent=agent,
+                origin_branch=agent_user.branch,
+                sender_agent=agent_user,
                 status=self.get_pending_status(),
                 shipping_fee=shipping_fee
             )
@@ -213,21 +220,21 @@ class PackageViewSet(viewsets.ModelViewSet):
                 package=package,
                 driver=driver,
                 vehicle=vehicle,
-                branch=agent.branch,
-                company=agent.branch.company,
+                branch=agent_user.branch,
+                company=agent_user.company,
                 departure_time=departure_time,
                 amount_paid=shipping_fee,
                 status="sent"
             )
             
             logger.info(
-                f"Package {package.tracking_number} created by agent {agent.user.username} "
+                f"Package {package.tracking_number} created by agent {agent_user.username} "
                 f"with ticket {ticket.ticket_code}"
             )
             
         except Exception as e:
             logger.error(f"Error creating package: {str(e)}")
-            raise ValidationError({"non_field_errors": ["An error occurred while creating the package."]})
+            raise ValidationError({"error": f"Failed to create package: {str(e)}"})
 
     @swagger_auto_schema(
         responses={
@@ -241,7 +248,7 @@ class PackageViewSet(viewsets.ModelViewSet):
         """
         return super().retrieve(request, *args, **kwargs)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], url_path='mark_delivered')
     def mark_delivered(self, request, pk=None):
         """
         Mark a package as delivered.
@@ -268,10 +275,13 @@ class PackageViewSet(viewsets.ModelViewSet):
         package.save()
         
         # Update corresponding ticket
-        ticket = package.ticket
-        ticket.status = "delivered"
-        ticket.updated_at = timezone.now()
-        ticket.save()
+        try:
+            ticket = Ticket.objects.get(package=package)
+            ticket.status = "delivered"
+            ticket.updated_at = timezone.now()
+            ticket.save()
+        except Ticket.DoesNotExist:
+            logger.warning(f"No ticket found for package {package.tracking_number}")
         
         return Response({"status": "Package marked as delivered"}, status=status.HTTP_200_OK)
 
@@ -316,9 +326,6 @@ class PackageViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-
-
-
 class PackageStatusViewSet(viewsets.ModelViewSet):
     queryset = PackageStatus.objects.all()
     serializer_class = PackageStatusSerializer
@@ -332,19 +339,17 @@ class TicketViewSet(viewsets.ModelViewSet):
     queryset = Ticket.objects.select_related('package', 'driver', 'vehicle').all()
     serializer_class = TicketSerializer
     permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['status', 'company', 'branch', 'driver', 'vehicle']
 
     def get_queryset(self):
         user = self.request.user
         if user.is_superuser:
             return self.queryset
-        elif hasattr(user, 'agent'):
-            return self.queryset.filter(company=user.agent.branch.company)
-        elif hasattr(user, 'branchadmin'):
-            return self.queryset.filter(branch=user.branchadmin.branch)
-        elif hasattr(user, 'companyadmin'):
-            return self.queryset.filter(company=user.companyadmin.company)
+        elif user.role and user.role.name.lower() == 'agent':
+            return self.queryset.filter(company=user.company)
+        elif user.role and user.role.name.lower() == 'branch admin':
+            return self.queryset.filter(branch=user.branch)
+        elif user.role and user.role.name.lower() == 'company admin':
+            return self.queryset.filter(company=user.company)
         else:
             return Ticket.objects.none()
 
@@ -379,6 +384,36 @@ class DriverViewSet(viewsets.ModelViewSet):
     queryset = Driver.objects.all()
     serializer_class = DriverSerializer
     permission_classes = [IsBranchAdmin | IsCompanyAdmin | IsAgent | IsSystemAdmin]
+    
+    def get_queryset(self):
+        """Filter drivers based on user's company"""
+        user = self.request.user
+        
+        # System admin can see all drivers
+        if user.role and user.role.name.lower() == 'system admin':
+            return Driver.objects.all()
+            
+        # Company admins, branch admins and agents see drivers from their company
+        if hasattr(user, 'company') and user.company:
+            return Driver.objects.filter(company=user.company)
+            
+        return Driver.objects.none()
+    
+    def perform_create(self, serializer):
+        """Auto-assign company based on the authenticated user's company"""
+        user = self.request.user
+        
+        # If the user is a system admin and company is provided, use that
+        if user.role and user.role.name.lower() == 'system admin':
+            # Use the company from request data
+            return serializer.save()
+            
+        # For company admin, branch admin, or agent - use their company
+        if hasattr(user, 'company') and user.company:
+            return serializer.save(company=user.company)
+            
+        # Fail if no company can be determined
+        raise ValidationError({"company": "Unable to determine company for driver"})
 
 
 class VehicleViewSet(viewsets.ModelViewSet):
@@ -393,10 +428,6 @@ class CategoryViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAgent | IsAuthenticated]
 
 
-class AgentViewSet(viewsets.ModelViewSet):
-    queryset = Agent.objects.all()
-    serializer_class = AgentSerializer
-    permission_classes = [IsAuthenticated | IsAgent]
 
 
 class TicketReportView(generics.ListAPIView):
