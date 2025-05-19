@@ -34,7 +34,7 @@ class CreateCompanyAdminView(generics.CreateAPIView):
         company_admin_role = get_object_or_404(Role, name="company admin")
         
         # Get company
-        company_id = self.request.data.get('company_id')
+        company_id = self.request.data.get('company')
         company = get_object_or_404(Company, id=company_id)
         
         # Create user with company admin role
@@ -57,7 +57,7 @@ class CreateBranchAdminView(generics.CreateAPIView):
         branch_admin_role = get_object_or_404(Role, name="branch admin")
         
         # Get branch
-        branch_id = self.request.data.get('branch_id')
+        branch_id = self.request.data.get('branch')
         branch = get_object_or_404(Branch, id=branch_id, company=user.company)
         
         # Create user with branch admin role
@@ -77,7 +77,6 @@ class CreateAgentView(generics.CreateAPIView):
     def perform_create(self, serializer):
         user = self.request.user
         
-        # Get agent role
         agent_role = get_object_or_404(Role, id=4)
         
         new_user = serializer.save(
@@ -86,12 +85,5 @@ class CreateAgentView(generics.CreateAPIView):
             branch=user.branch,
             is_staff=False
         )
-        
-        # Create Agent record in packages app
-        from packages.models import Agent
-        Agent.objects.create(
-            user=new_user,
-            branch=user.branch
-        )
-        
+                
         return new_user

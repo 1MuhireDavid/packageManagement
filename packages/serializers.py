@@ -56,19 +56,22 @@ class PackageSerializer(serializers.ModelSerializer):
                            'shipping_fee', 'status', 'created_at', 'updated_at',
                            'sending_agent', 'sent_at', 'receiving_agent', 'received_at',
                             'delivery_agent', 'delivered_at'
+                            
                     ]
-        def get_receiver_agent_name(self, obj):
+                    
+    def get_receiver_agent_name(self, obj):
             return obj.receiver_agent.username if obj.receiver_agent else None
-        
-        def get_sending_agent_name(self, obj):
-            return obj.sending_agent.username if obj.sending_agent else None
-        
-        def get_receiving_agent_name(self, obj):
-            return obj.receiving_agent.username if obj.receiving_agent else None
-        
-        def get_delivery_agent_name(self, obj):
-            return obj.delivery_agent.username if obj.delivery_agent else None
     
+    def get_sending_agent_name(self, obj):
+        return obj.sending_agent.username if obj.sending_agent else None
+    
+    def get_receiving_agent_name(self, obj):
+        return obj.receiving_agent.username if obj.receiving_agent else None
+    
+    def get_delivery_agent_name(self, obj):
+        return obj.delivery_agent.username if obj.delivery_agent else None
+
+
     def create(self, validated_data):
         driver = validated_data.pop('driver', None)
         vehicle = validated_data.pop('vehicle', None)

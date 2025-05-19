@@ -66,6 +66,7 @@ class PackageViewSet(viewsets.ModelViewSet):
         Return a queryset filtered based on the user's role.
         """
         if getattr(self, 'swagger_fake_view', False):
+            # Return empty queryset for swagger schema generation
             return Package.objects.none()
 
         user = self.request.user
@@ -73,17 +74,17 @@ class PackageViewSet(viewsets.ModelViewSet):
             return Package.objects.none()
 
         # If user is an agent
-        if user.role and user.role.name.lower() == 'agent':
+        if hasattr(user, 'role') and user.role and user.role.name.lower() == 'agent':
             return Package.objects.filter(
                 Q(sender_agent=user) |
                 Q(receiver_agent=user) |
                 Q(destination_branch=user.branch)
-            ).select_related( 'category', 'sender_agent', 'receiver_agent',
+            ).select_related('category', 'sender_agent', 'receiver_agent',
                 'origin_branch', 'destination_branch'
             )
                 
         # If user is a branch admin
-        if user.role and user.role.name.lower() == 'branch admin' and hasattr(user, 'branch'):
+        if hasattr(user, 'role') and user.role and user.role.name.lower() == 'branch admin' and hasattr(user, 'branch'):
             return Package.objects.filter(
                 Q(origin_branch=user.branch) | Q(destination_branch=user.branch)
             ).select_related('category', 'sender_agent', 'receiver_agent',
@@ -91,21 +92,22 @@ class PackageViewSet(viewsets.ModelViewSet):
             )
 
         # If user is a company admin
-        if user.role and user.role.name.lower() == 'company admin' and hasattr(user, 'company'):
+        if hasattr(user, 'role') and user.role and user.role.name.lower() == 'company admin' and hasattr(user, 'company'):
             return Package.objects.filter(
                 Q(origin_branch__company=user.company) | 
                 Q(destination_branch__company=user.company)
-            ).select_related( 'category', 'sender_agent', 'receiver_agent',
+            ).select_related('category', 'sender_agent', 'receiver_agent',
                 'origin_branch', 'destination_branch'
             )
 
         # System admin or fallback
-        if user.role and user.role.name.lower() == 'system admin':
+        if hasattr(user, 'role') and user.role and user.role.name.lower() == 'system admin':
             return Package.objects.all().select_related('category', 'sender_agent', 'receiver_agent',
                 'origin_branch', 'destination_branch'
             )
             
         return Package.objects.none()
+
 
     def list(self, request, *args, **kwargs):
         """
@@ -429,14 +431,17 @@ class TicketViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Ticket.objects.none()
+        
         user = self.request.user
         if user.is_superuser:
             return self.queryset
-        elif user.role and user.role.name.lower() == 'agent':
+        elif hasattr(user, 'role') and user.role and user.role.name.lower() == 'agent':
             return self.queryset.filter(company=user.company)
-        elif user.role and user.role.name.lower() == 'branch admin':
+        elif hasattr(user, 'role') and user.role and user.role.name.lower() == 'branch admin':
             return self.queryset.filter(branch=user.branch)
-        elif user.role and user.role.name.lower() == 'company admin':
+        elif hasattr(user, 'role') and user.role and user.role.name.lower() == 'company admin':
             return self.queryset.filter(company=user.company)
         else:
             return Ticket.objects.none()
@@ -477,8 +482,12 @@ class DriverViewSet(viewsets.ModelViewSet):
         """Filter drivers based on user's company"""
         user = self.request.user
         
+        if getattr(self, 'swagger_fake_view', False):
+            # Return empty queryset for swagger schema generation
+            return Driver.objects.none()
+        
         # System admin can see all drivers
-        if user.role and user.role.name.lower() == 'system admin':
+        if hasattr(user, 'role') and user.role and user.role.name.lower() == 'system admin':
             return Driver.objects.all()
             
         # Company admins, branch admins and agents see drivers from their company
