@@ -1,0 +1,2 @@
+docker build --tag package-tracking-system .
+docker run --publish 8000:8000 package-tracking-system

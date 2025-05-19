@@ -58,10 +58,5 @@ class Command(BaseCommand):
                 user.set_password('password123')
                 user.save()
                 
-                # Create Agent record for agent users
-                if role_key == 'agent':
-                    from packages.models import Agent
-                    Agent.objects.get_or_create(user=user, branch=branch)
 
         self.stdout.write(self.style.SUCCESS('Seeded roles, company, branch, and example users.'))
-        
