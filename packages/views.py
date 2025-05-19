@@ -201,7 +201,7 @@ class PackageViewSet(viewsets.ModelViewSet):
         shipping_fee = round(value * Decimal('0.10'), 2)
         
         try:
-            # Save the package
+            
             package = serializer.save(
                 tracking_number=tracking_number,
                 origin_branch=agent_user.branch,
@@ -259,18 +259,23 @@ class PackageViewSet(viewsets.ModelViewSet):
             
         if package.destination_branch != agent.branch:
             raise PermissionDenied("Only agents at the destination branch can mark packages as delivered.")
-            
         
+        if package.status != 'received':
+            raise ValidationError({"status": "Only packages with 'received' status can be marked as delivered."})
+
+        current_time = timezone.now()
         
-        package.status = 'sent'
+        package.status = 'delivered'
         package.receiver_agent = agent
+        package.delivery_agent = agent
+        package.delivered_at = current_time
         package.save()
         
         # Update corresponding ticket
         try:
             ticket = Ticket.objects.get(package=package)
             ticket.status = "delivered"
-            ticket.updated_at = timezone.now()
+            ticket.updated_at = current_time
             ticket.save()
         except Ticket.DoesNotExist:
             logger.warning(f"No ticket found for package {package.tracking_number}")
@@ -321,10 +326,52 @@ class PackageViewSet(viewsets.ModelViewSet):
         ticket.save()
 
         # Update package status (optional if using PackageStatus FK)
+        current_time = timezone.now()
         package.status = 'sent'
+        package.sending_agent = user
+        package.sent_at = current_time
         package.save()
 
         return Response({"message": "Package marked as sent."}, status=200)
+    
+    @action(detail=True, methods=['post'], url_path='mark_received')
+    def mark_received(self, request, pk=None):
+        """
+        Mark a package as received.
+        
+        Only agents at the destination branch can mark a package as received.
+        This indicates the package has arrived at the destination branch but has not yet been delivered
+        to the final recipient.
+        """
+        package = self.get_object()
+        agent = self.get_agent()
+        
+        if not agent:
+            raise PermissionDenied("Only agents can mark packages as received.")
+            
+        if package.destination_branch != agent.branch:
+            raise PermissionDenied("Only agents at the destination branch can mark packages as received.")
+        
+        if package.status != 'sent':
+            raise ValidationError({"status": "Only packages with 'sent' status can be marked as received."})
+        
+        current_time = timezone.now()
+        package.status = 'received'
+        package.receiving_agent = agent
+        package.received_at = current_time
+        package.save()
+        
+    
+        try:
+            ticket = Ticket.objects.get(package=package)
+            ticket.status = "received"
+            ticket.updated_at = current_time
+            ticket.save()
+        except Ticket.DoesNotExist:
+            logger.warning(f"No ticket found for package {package.tracking_number}")
+        
+        return Response({"status": "Package marked as received"}, status=status.HTTP_200_OK)
+
 
     @action(detail=False, methods=['get'])
     def pending(self, request):

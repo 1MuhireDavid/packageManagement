@@ -35,6 +35,10 @@ class PackageSerializer(serializers.ModelSerializer):
         required=False
     )
     status = serializers.ChoiceField(choices=STATUS_CHOICES, read_only=True)
+
+    sending_agent_name = serializers.SerializerMethodField()
+    receiving_agent_name = serializers.SerializerMethodField()
+    delivery_agent_name = serializers.SerializerMethodField()
     
     class Meta:
         model = Package
@@ -43,13 +47,29 @@ class PackageSerializer(serializers.ModelSerializer):
             'category', 'status', 'sender_agent', 'receiver_agent',
             'origin_branch', 'destination_branch', 'created_at', 'updated_at',
             'driver', 'vehicle', 'departure_time',
-            'receiver_name', 'receiver_phone', 'sender_name', 'sender_phone'
+            'receiver_name', 'receiver_phone', 'sender_name', 'sender_phone',
+            'sending_agent', 'sending_agent_name', 'sent_at',
+            'receiving_agent', 'receiving_agent_name', 'received_at',
+            'delivery_agent', 'delivery_agent_name', 'delivered_at'
         ]
         read_only_fields = ['tracking_number', 'sender_agent', 'origin_branch', 
-                           'shipping_fee', 'status', 'created_at', 'updated_at']
+                           'shipping_fee', 'status', 'created_at', 'updated_at',
+                           'sending_agent', 'sent_at', 'receiving_agent', 'received_at',
+                            'delivery_agent', 'delivered_at'
+                    ]
+        def get_receiver_agent_name(self, obj):
+            return obj.receiver_agent.username if obj.receiver_agent else None
+        
+        def get_sending_agent_name(self, obj):
+            return obj.sending_agent.username if obj.sending_agent else None
+        
+        def get_receiving_agent_name(self, obj):
+            return obj.receiving_agent.username if obj.receiving_agent else None
+        
+        def get_delivery_agent_name(self, obj):
+            return obj.delivery_agent.username if obj.delivery_agent else None
     
     def create(self, validated_data):
-        # Remove fields that don't exist in the Package model
         driver = validated_data.pop('driver', None)
         vehicle = validated_data.pop('vehicle', None)
         departure_time = validated_data.pop('departure_time', None)

@@ -16,7 +16,7 @@ class UserDetailView(generics.RetrieveAPIView):
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = RegisterSerializer
-    permission_classes = [IsSystemAdmin | IsCompanyAdmin | IsBranchAdmin]
+    permission_classes = [IsSystemAdmin]
 
 @api_view(['GET'])
 @permission_classes([IsSystemAdmin])
@@ -25,7 +25,6 @@ def list_all_users(request):
     serializer = UserSerializer(users, many=True)
     return Response(serializer.data)
 
-# System Admin creates Company Admin
 class CreateCompanyAdminView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [IsAuthenticated, IsSystemAdmin]
@@ -81,7 +80,6 @@ class CreateAgentView(generics.CreateAPIView):
         # Get agent role
         agent_role = get_object_or_404(Role, id=4)
         
-        # Create user with agent role
         new_user = serializer.save(
             role=agent_role,
             company=user.company,
